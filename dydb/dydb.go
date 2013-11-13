@@ -6,7 +6,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/bmizerany/aws4"
+	//"github.com/bmizerany/aws4"
+	"github.com/raff/aws4"
 	"net/http"
 	"strings"
 )
