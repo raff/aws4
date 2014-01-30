@@ -10,6 +10,7 @@ import (
 	"github.com/raff/aws4"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // A ResponseError is returned by Decode when an error communicating with
@@ -83,6 +84,10 @@ func (db *DB) Exec(action string, v interface{}) error {
 // with DynamoDB, Query returns a Decoder that returns only the error,
 // otherwise a json.Decoder is returned.
 func (db *DB) Query(action string, v interface{}) Decoder {
+	return db.RetryQuery(action, v, uint(1))
+}
+
+func (db *DB) RetryQuery(action string, v interface{}, retries uint) Decoder {
 	cl := db.Client
 	if cl == nil {
 		cl = aws4.DefaultClient
@@ -107,26 +112,48 @@ func (db *DB) Query(action string, v interface{}) Decoder {
 		return &errorDecoder{err: err}
 	}
 
-	r, err := http.NewRequest("POST", url, bytes.NewBuffer(b))
-	if err != nil {
-		return &errorDecoder{err: err}
-	}
-	r.Header.Set("Content-Type", "application/x-amz-json-1.0")
-	r.Header.Set("X-Amz-Target", "DynamoDB_"+ver+"."+action)
+	var errorResponse *ResponseError
 
-	resp, err := cl.Do(r)
-	if err != nil {
-		return &errorDecoder{err: err}
-	}
+	for i := uint(0); i < retries; i++ {
+		retry_sleep(i)
 
-	if code := resp.StatusCode; code != 200 {
-		// Read the whole body in so that Keep-Alives may be released back to the pool.
-		var e struct {
-			Message string
-			Type    string `json:"__type"`
+		r, err := http.NewRequest("POST", url, bytes.NewBuffer(b))
+		if err != nil {
+			return &errorDecoder{err: err}
 		}
-		json.NewDecoder(resp.Body).Decode(&e)
-		return &errorDecoder{err: &ResponseError{code, e.Type, e.Message}}
+		r.Header.Set("Content-Type", "application/x-amz-json-1.0")
+		r.Header.Set("X-Amz-Target", "DynamoDB_"+ver+"."+action)
+
+		resp, err := cl.Do(r)
+		if err != nil {
+			return &errorDecoder{err: err}
+		}
+
+		if code := resp.StatusCode; code != 200 {
+			// Read the whole body in so that Keep-Alives may be released back to the pool.
+			var e struct {
+				Message string
+				Type    string `json:"__type"`
+			}
+			json.NewDecoder(resp.Body).Decode(&e)
+			errorResponse = &ResponseError{code, e.Type, e.Message}
+			if !IsException(errorResponse, "ProvisionedThroughputExceededException") {
+				break
+			} else {
+				continue
+			}
+		}
+		return json.NewDecoder(resp.Body)
 	}
-	return json.NewDecoder(resp.Body)
+
+	return &errorDecoder{err: errorResponse}
+}
+
+func retry_sleep(retry uint) {
+	if retry <= 0 {
+		return
+	}
+
+	t := (2 << (retry - 1)) * 50 * time.Millisecond
+	time.Sleep(t)
 }
