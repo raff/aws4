@@ -45,7 +45,9 @@ func (c *Client) client() *http.Client {
 }
 
 func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
-	Sign(c.Keys, req)
+	if err := Sign(c.Keys, req); err != nil {
+		return nil, err
+	}
 	return c.client().Do(req)
 }
 
