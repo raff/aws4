@@ -46,17 +46,20 @@ type Service struct {
 	Region string
 }
 
+// SignService signs a request with the specified name and region
+func SignService(name, region string, keys *Keys, r *http.Request) error {
+	sv := &Service{Name: name, Region: region}
+	return sv.Sign(keys, r)
+}
+
 // Sign signs a request with a Service derived from r.Host
 func Sign(keys *Keys, r *http.Request) error {
 	parts := strings.Split(r.Host, ".")
 	if len(parts) < 4 {
 		return fmt.Errorf("Invalid AWS Endpoint: %s", r.Host)
 	}
-	sv := new(Service)
-	sv.Name = parts[0]
-	sv.Region = parts[1]
-	sv.Sign(keys, r)
-	return nil
+
+	return SignService(parts[0], parts[1], keys, r)
 }
 
 // Sign signs an HTTP request with the given AWS keys for use on service s.

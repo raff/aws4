@@ -58,6 +58,7 @@ type Decoder interface {
 const (
 	DefaultURL     = "https://dynamodb.us-east-1.amazonaws.com/"
 	DefaultVersion = "20120810"
+	DefaultService = "dynamodb" // the service should always be dynamodb
 )
 
 type DB struct {
@@ -70,6 +71,63 @@ type DB struct {
 
 	// If empty, DefaultURL is used.
 	URL string
+
+	// If empty, extract region from URL
+	Region string
+
+	// If empty, use default service
+	Service string
+}
+
+// getDetails returns the configuration details to execute a request:
+// url, version, service, region
+func (db *DB) getDetails() (url, version, service, region string, err error) {
+	if len(db.URL) > 1 {
+		url = db.URL
+	} else {
+		url = DefaultURL
+	}
+
+	if len(db.Version) > 1 {
+		version = db.Version
+	} else {
+		version = DefaultVersion
+	}
+
+	if len(db.Service) > 1 {
+		service = db.Service
+	} else {
+		service = DefaultService
+	}
+
+	if len(db.Region) > 1 {
+		region = db.Region
+	} else {
+		parts := strings.Split(url, ".")
+		if len(parts) < 4 {
+			return "", "", "", "", fmt.Errorf("Invalid DynamoDB Endpoint: %s", url)
+		}
+
+		region = parts[1]
+	}
+
+	return
+}
+
+func (db *DB) url() string {
+	if db.URL == "" {
+		return DefaultURL
+	} else {
+		return db.URL
+	}
+}
+
+func (db *DB) version() string {
+	if db.Version == "" {
+		return DefaultVersion
+	} else {
+		return db.Version
+	}
 }
 
 // Exec is like Query, but discards the response. It returns the error if there
@@ -93,14 +151,9 @@ func (db *DB) RetryQuery(action string, v interface{}, retries uint) Decoder {
 		cl = aws4.DefaultClient
 	}
 
-	url := db.URL
-	if url == "" {
-		url = DefaultURL
-	}
-
-	ver := db.Version
-	if ver == "" {
-		ver = DefaultVersion
+	url, ver, svc, region, err := db.getDetails()
+	if err != nil {
+		return &errorDecoder{err: err}
 	}
 
 	if v == nil {
@@ -124,7 +177,7 @@ func (db *DB) RetryQuery(action string, v interface{}, retries uint) Decoder {
 		r.Header.Set("Content-Type", "application/x-amz-json-1.0")
 		r.Header.Set("X-Amz-Target", "DynamoDB_"+ver+"."+action)
 
-		resp, err := cl.Do(r)
+		resp, err := cl.DoService(svc, region, r)
 		if err != nil {
 			return &errorDecoder{err: err}
 		}

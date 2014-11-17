@@ -44,6 +44,13 @@ func (c *Client) client() *http.Client {
 	return c.Client
 }
 
+func (c *Client) DoService(name, region string, req *http.Request) (resp *http.Response, err error) {
+	if err := SignService(name, region, c.Keys, req); err != nil {
+		return nil, err
+	}
+	return c.client().Do(req)
+}
+
 func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 	if err := Sign(c.Keys, req); err != nil {
 		return nil, err
