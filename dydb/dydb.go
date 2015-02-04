@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	//"github.com/bmizerany/aws4"
 	"github.com/raff/aws4"
 	"net/http"
@@ -49,6 +50,16 @@ type errorDecoder struct {
 
 func (e *errorDecoder) Decode(v interface{}) error {
 	return e.err
+}
+
+type closeDecoder struct {
+	c io.Closer
+	d *json.Decoder
+}
+
+func (cd *closeDecoder) Decode(v interface{}) error {
+	defer cd.c.Close()
+	return cd.d.Decode(v)
 }
 
 type Decoder interface {
@@ -182,6 +193,7 @@ func (db *DB) RetryQuery(action string, v interface{}, retries uint) Decoder {
 				Message string
 				Type    string `json:"__type"`
 			}
+			defer resp.Body.Close()
 			json.NewDecoder(resp.Body).Decode(&e)
 			errorResponse = &ResponseError{code, e.Type, e.Message}
 			if !IsException(errorResponse, "ProvisionedThroughputExceededException") {
@@ -190,7 +202,7 @@ func (db *DB) RetryQuery(action string, v interface{}, retries uint) Decoder {
 				continue
 			}
 		}
-		return json.NewDecoder(resp.Body)
+		return &closeDecoder{c: resp.Body, d: json.NewDecoder(resp.Body)}
 	}
 
 	return &errorDecoder{err: errorResponse}
